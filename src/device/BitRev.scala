@@ -51,5 +51,5 @@ class bitrevChisel extends RawModule { // we do not need clock and reset
     )
   )
 
-  io.miso := Mux(rxCtr < 8.U, 1.B, data(0))
+  io.miso := Mux(reset.asBool | (rxCtr < 8.U), 1.B, data(0))
 }
