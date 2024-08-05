@@ -168,7 +168,7 @@ class APBSPI(address: Seq[AddressSet])(implicit p: Parameters) extends LazyModul
       // scalafmt: { maxColumn = 512, align.tokens.add = [ { code = "," } ] }
       XipStateProp(S_Idle.BP,            None,                     None,                     false),
       XipStateProp(S_PassThru.BP,        None,                     None,                     false),
-      XipStateProp(S_XipInitDiv.BP,      Some(0x00000001.U(32.W)), Some(0x10001014.U(32.W)), false),
+      XipStateProp(S_XipInitDiv.BP,      Some(0x00000000.U(32.W)), Some(0x10001014.U(32.W)), false), // TODO: Fill in actual divider
       XipStateProp(S_XipInitDivDone.BP,  None,                     None,                     false),
       XipStateProp(S_XipInitSs.BP,       Some(0x00000001.U(32.W)), Some(0x10001018.U(32.W)), false),
       XipStateProp(S_XipInitSsDone.BP,   None,                     None,                     false),
