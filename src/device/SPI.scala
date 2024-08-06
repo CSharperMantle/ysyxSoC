@@ -32,10 +32,10 @@ class flash extends BlackBox {
 }
 
 private case class XipStateProp(
-  private val state: BitPat,
-  val write:         Option[BitPat],
-  val addr:          Option[BitPat],
-  val writeReq:      Boolean)
+  val state:    BitPat,
+  val write:    Option[BitPat],
+  val addr:     Option[BitPat],
+  val writeReq: Boolean)
     extends DecodePattern {
   require(!(!write.isEmpty && addr.isEmpty))
 
@@ -43,42 +43,42 @@ private case class XipStateProp(
 }
 
 private object XipEnableField extends BoolDecodeField[XipStateProp] {
-  def name = "penable"
-  def genTable(state: XipStateProp): BitPat = {
+  override def name = "penable"
+  override def genTable(state: XipStateProp): BitPat = {
     if (state.addr.isEmpty) { n }
     else { y }
   }
 }
 
 private object XipWriteField extends BoolDecodeField[XipStateProp] {
-  def name = "pwrite"
-  def genTable(state: XipStateProp): BitPat = {
+  override def name = "pwrite"
+  override def genTable(state: XipStateProp): BitPat = {
     if (state.write.isEmpty) { n }
     else { y }
   }
 }
 
 private object XipWdataField extends DecodeField[XipStateProp, UInt] {
-  def name       = "pwdata"
-  def chiselType = UInt(32.W)
-  def genTable(state: XipStateProp): BitPat = {
+  override def name       = "pwdata"
+  override def chiselType = UInt(32.W)
+  override def genTable(state: XipStateProp): BitPat = {
     if (state.write.isEmpty) { BitPat.N(32) }
     else { state.write.get }
   }
 }
 
 private object XipWdataSelField extends BoolDecodeField[XipStateProp] {
-  def name = "pwdata_sel"
-  def genTable(state: XipStateProp): BitPat = {
+  override def name = "pwdata_sel"
+  override def genTable(state: XipStateProp): BitPat = {
     if (state.writeReq) { y }
     else { n }
   }
 }
 
 private object XipAddrField extends DecodeField[XipStateProp, UInt] {
-  def name       = "paddr"
-  def chiselType = UInt(32.W)
-  def genTable(state: XipStateProp): BitPat = {
+  override def name       = "paddr"
+  override def chiselType = UInt(32.W)
+  override def genTable(state: XipStateProp): BitPat = {
     if (state.addr.isEmpty) { BitPat.N(32) }
     else { state.addr.get }
   }
