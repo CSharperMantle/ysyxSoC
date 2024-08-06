@@ -31,7 +31,7 @@ class flash extends BlackBox {
   val io = IO(Flipped(new SPIIO(1)))
 }
 
-private case class XipStateProp(
+case class XipStateProp(
   val state:    BitPat,
   val write:    Option[BitPat],
   val addr:     Option[BitPat],
@@ -42,7 +42,7 @@ private case class XipStateProp(
   def bitPat = state
 }
 
-private object XipEnableField extends BoolDecodeField[XipStateProp] {
+object XipEnableField extends BoolDecodeField[XipStateProp] {
   override def name = "penable"
   override def genTable(state: XipStateProp): BitPat = {
     if (state.addr.isEmpty) { n }
@@ -50,7 +50,7 @@ private object XipEnableField extends BoolDecodeField[XipStateProp] {
   }
 }
 
-private object XipWriteField extends BoolDecodeField[XipStateProp] {
+object XipWriteField extends BoolDecodeField[XipStateProp] {
   override def name = "pwrite"
   override def genTable(state: XipStateProp): BitPat = {
     if (state.write.isEmpty) { n }
@@ -58,7 +58,7 @@ private object XipWriteField extends BoolDecodeField[XipStateProp] {
   }
 }
 
-private object XipWdataField extends DecodeField[XipStateProp, UInt] {
+object XipWdataField extends DecodeField[XipStateProp, UInt] {
   override def name       = "pwdata"
   override def chiselType = UInt(32.W)
   override def genTable(state: XipStateProp): BitPat = {
@@ -67,7 +67,7 @@ private object XipWdataField extends DecodeField[XipStateProp, UInt] {
   }
 }
 
-private object XipWdataSelField extends BoolDecodeField[XipStateProp] {
+object XipWdataSelField extends BoolDecodeField[XipStateProp] {
   override def name = "pwdata_sel"
   override def genTable(state: XipStateProp): BitPat = {
     if (state.writeReq) { y }
@@ -75,7 +75,7 @@ private object XipWdataSelField extends BoolDecodeField[XipStateProp] {
   }
 }
 
-private object XipAddrField extends DecodeField[XipStateProp, UInt] {
+object XipAddrField extends DecodeField[XipStateProp, UInt] {
   override def name       = "paddr"
   override def chiselType = UInt(32.W)
   override def genTable(state: XipStateProp): BitPat = {
