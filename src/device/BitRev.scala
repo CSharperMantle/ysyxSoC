@@ -20,22 +20,6 @@ class bitrevChisel extends RawModule { // we do not need clock and reset
     RegInit(0.U(4.W))
   }
 
-  // private object State extends ChiselEnum {
-  //   val S_Idle = Value
-  //   val S_Read = Value
-  //   val S_Write = Value
-  // }
-  // import State._
-  // private val y = withClockAndReset(clock, reset) {
-  //   RegInit(S_Read)
-  // }
-  // y := MuxLookup(y, S_Read)(
-  //   Seq(
-  //     S_Read -> Mux(rxCtr >= 8.U, S_Write, S_Read),
-  //     S_Write -> Mux(txCtr >= 8.U, S_Idle, S_Write)
-  //   )
-  // )
-
   rxCtr := rxCtr + 1.U
   txCtr := txCtr - 1.U
 
