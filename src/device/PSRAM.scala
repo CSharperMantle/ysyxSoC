@@ -26,11 +26,13 @@ class psram_top_apb extends BlackBox {
 
 class PsramModelBlackBox extends BlackBox with HasBlackBoxInline {
   class Port extends Bundle {
-    val addr  = Input(UInt(32.W))
-    val wData = Input(UInt(32.W))
-    val wEn   = Input(Bool())
-    val rEn   = Input(Bool())
-    val rData = Output(UInt(32.W))
+    val nCe      = Input(Bool())
+    val addr     = Input(UInt(32.W))
+    val wData    = Input(UInt(32.W))
+    val wNybbles = Input(UInt(4.W))
+    val wEn      = Input(Bool())
+    val rEn      = Input(Bool())
+    val rData    = Output(UInt(32.W))
   }
 
   val io = IO(new Port)
@@ -39,28 +41,27 @@ class PsramModelBlackBox extends BlackBox with HasBlackBoxInline {
     s"${name}.sv",
     s"""
        |module ${name} (
+       |  input             nCe,
        |  input      [31:0] addr,
        |  input      [31:0] wData,
+       |  input      [3:0]  wNybbles,
        |  input             wEn,
        |  input             rEn,
        |  output reg [31:0] rData
        |);
        |  import "DPI-C" function void soc_dpi_psram_read(input  int addr,
        |                                                  output int data);
-       |  import "DPI-C" function void soc_dpi_psram_write(input int addr,
-       |                                                   input int data);
+       |  import "DPI-C" function void soc_dpi_psram_write(input int  addr,
+       |                                                   input int  data,
+       |                                                   input byte nybbles);
        |
-       |  always_comb begin
-       |    if (rEn) begin
-       |      soc_dpi_psram_read(addr, rData);
-       |    end else begin
-       |      rData = 32'h0;
-       |    end
+       |  always @(posedge rEn) begin
+       |    soc_dpi_psram_read(addr, rData);
        |  end
        |
-       |  always_comb begin
+       |  always @(posedge nCe) begin
        |    if (wEn) begin
-       |      soc_dpi_psram_write(addr, wData);
+       |      soc_dpi_psram_write(addr, wData, {4'd0, wNybbles});
        |    end
        |  end
        |endmodule
@@ -70,6 +71,7 @@ class PsramModelBlackBox extends BlackBox with HasBlackBoxInline {
 
 class PsramModel extends Module {
   class Port extends Bundle {
+    val nCe    = Input(Bool())
     val din    = Input(UInt(4.W))
     val dout   = Output(UInt(4.W))
     val doutEn = Output(Bool())
@@ -84,14 +86,14 @@ class PsramModel extends Module {
 
   private val backend = Module(new PsramModelBlackBox)
 
-  private val cmd  = RegInit(0.U(8.W))
-  private val addr = RegInit(0.U(32.W))
+  private val cmd  = withReset(0.B) { RegInit(0.U(8.W)) }
+  private val addr = withReset(0.B) { RegInit(0.U(32.W)) }
   private val data = withReset(0.B) { RegInit(0.U(32.W)) }
 
   private val cmdCtr   = RegInit(0.U(4.W))
   private val addrCtr  = RegInit(0.U(4.W))
   private val dummyCtr = RegInit(0.U(4.W))
-  private val dataCtr  = RegInit(0.U(4.W))
+  private val dataCtr  = withReset(0.B) { RegInit(0.U(4.W)) }
 
   private object State extends ChiselEnum {
     val S_ReadCmd   = Value
@@ -115,7 +117,7 @@ class PsramModel extends Module {
     Seq(
       S_ReadCmd   -> Mux(cmdCtr >= 7.U, S_ReadAddr, S_ReadCmd),
       S_ReadAddr  -> Mux(addrCtr >= 5.U, cmdAction, S_ReadAddr),
-      S_ReadDummy -> Mux(dummyCtr >= 5.U, S_SendData, S_ReadDummy),
+      S_ReadDummy -> Mux(dummyCtr >= 6.U, S_SendData, S_ReadDummy),
       S_SendData  -> Mux(dataCtr >= 7.U, S_Idle, S_SendData),
       S_RecvData  -> Mux(dataCtr >= 7.U, S_Idle, S_RecvData)
     )
@@ -124,25 +126,49 @@ class PsramModel extends Module {
   cmdCtr   := Mux(y === S_ReadCmd, cmdCtr + 1.U, cmdCtr)
   addrCtr  := Mux(y === S_ReadAddr, addrCtr + 1.U, addrCtr)
   dummyCtr := Mux(y === S_ReadDummy, dummyCtr + 1.U, dummyCtr)
-  dataCtr  := Mux((y === S_SendData) | (y === S_RecvData), dataCtr + 1.U, dataCtr)
-
-  cmd  := Mux(y === S_ReadCmd, Cat(cmd(6, 0), io.din(0)), cmd)
-  addr := Mux(y === S_ReadAddr, Cat(addr(27, 0), io.din), addr)
-  data := MuxLookup(y, data)(
+  dataCtr := MuxLookup(y, dataCtr)(
     Seq(
-      S_ReadCmd   -> 0.U,
-      S_ReadDummy -> backend.io.rData,
-      S_RecvData  -> Cat(data(27, 0), io.din),
-      S_SendData  -> Cat(0.U(4.W), data(31, 28))
+      S_ReadCmd  -> 0.U,
+      S_SendData -> (dataCtr + 1.U),
+      S_RecvData -> (dataCtr + 1.U)
     )
   )
 
-  backend.io.addr  := addr
-  backend.io.rEn   := y === S_ReadDummy
-  backend.io.wEn   := cmd === Cmd.Write & reset.asBool
-  backend.io.wData := Cat(data(7, 0), data(15, 8), data(23, 16), data(31, 24))
+  val rDataShuffled = Cat(
+    backend.io.rData(27, 24),
+    backend.io.rData(31, 28),
+    backend.io.rData(19, 16),
+    backend.io.rData(23, 20),
+    backend.io.rData(11, 8),
+    backend.io.rData(15, 12),
+    backend.io.rData(3, 0),
+    backend.io.rData(7, 4)
+  )
 
-  io.dout   := Mux(dataCtr(0) === 1.B, data(7, 4), data(3, 0))
+  cmd := Mux(y === S_ReadCmd, Cat(cmd(6, 0), io.din(0)), cmd)
+  addr := MuxLookup(y, addr)(
+    Seq(
+      S_ReadCmd  -> 0.U,
+      S_ReadAddr -> Cat(addr(27, 0), io.din)
+    )
+  )
+  data := MuxLookup(y, data)(
+    Seq(
+      S_ReadCmd   -> 0.U,
+      S_ReadDummy -> rDataShuffled,
+      S_RecvData  -> Cat(data(27, 0), io.din),
+      S_SendData  -> Cat(0.U(4.W), data(31, 4))
+    )
+  )
+
+  backend.io.nCe      := io.nCe
+  backend.io.addr     := addr
+  backend.io.rEn      := y === S_ReadDummy
+  backend.io.wEn      := cmd === Cmd.Write & reset.asBool
+  backend.io.wData    := Cat(data(7, 0), data(15, 8), data(23, 16), data(31, 24))
+  backend.io.wNybbles := dataCtr
+
+  io.dout   := data(3, 0)
   io.doutEn := y === S_SendData
 }
 
@@ -156,6 +182,7 @@ class psramChisel extends RawModule {
   private val model = withClockAndReset(io.sck.asClock, io.ce_n.asAsyncReset) {
     Module(new PsramModel)
   }
+  model.io.nCe := io.ce_n
   model.io.din := TriStateInBuf(io.dio, model.io.dout, model.io.doutEn)
 }
 
