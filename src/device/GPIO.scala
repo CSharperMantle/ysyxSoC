@@ -53,13 +53,6 @@ class GPIOIO extends Bundle {
   val seg = Output(Vec(8, UInt(8.W)))
 }
 
-class GPIOCtrlIO extends Bundle {
-  val clock = Input(Clock())
-  val reset = Input(Reset())
-  val in    = Flipped(new APBBundle(APBBundleParameters(addrBits = 32, dataBits = 32)))
-  val gpio  = new GPIOIO
-}
-
 class GpioCtrl extends Module {
   class Port extends Bundle {
     val in   = Flipped(new APBBundle(APBBundleParameters(addrBits = 32, dataBits = 32)))
@@ -128,6 +121,13 @@ class GpioCtrl extends Module {
   io.in.prdata  := regSelData
 }
 
+class GPIOCtrlIO extends Bundle {
+  val clock = Input(Clock())
+  val reset = Input(Reset())
+  val in    = Flipped(new APBBundle(APBBundleParameters(addrBits = 32, dataBits = 32)))
+  val gpio  = new GPIOIO
+}
+
 class gpio_top_apb extends BlackBox {
   val io = IO(new GPIOCtrlIO)
 }
@@ -135,7 +135,7 @@ class gpio_top_apb extends BlackBox {
 class gpioChisel extends RawModule {
   val io = IO(new GPIOCtrlIO)
 
-  val ctrl = withClockAndReset(io.clock, io.reset) { Module(new GpioCtrl) }
+  private val ctrl = withClockAndReset(io.clock, io.reset) { Module(new GpioCtrl) }
   ctrl.io.gpio <> io.gpio
   ctrl.io.in   <> io.in
 }
