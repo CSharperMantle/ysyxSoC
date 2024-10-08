@@ -147,7 +147,7 @@ class APBGPIO(address: Seq[AddressSet])(implicit p: Parameters) extends LazyModu
         Seq(
           APBSlaveParameters(
             address       = address,
-            executable    = true,
+            executable    = false,
             supportsRead  = true,
             supportsWrite = true
           )
