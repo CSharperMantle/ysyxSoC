@@ -62,7 +62,7 @@ object XipWdataField extends DecodeField[XipStateProp, UInt] {
   override def name       = "pwdata"
   override def chiselType = UInt(32.W)
   override def genTable(state: XipStateProp): BitPat = {
-    if (state.write.isEmpty) { BitPat.N(32) }
+    if (state.write.isEmpty) { BitPat.dontCare(32) }
     else { state.write.get }
   }
 }
@@ -79,7 +79,7 @@ object XipAddrField extends DecodeField[XipStateProp, UInt] {
   override def name       = "paddr"
   override def chiselType = UInt(32.W)
   override def genTable(state: XipStateProp): BitPat = {
-    if (state.addr.isEmpty) { BitPat.N(32) }
+    if (state.addr.isEmpty) { BitPat.dontCare(32) }
     else { state.addr.get }
   }
 }
