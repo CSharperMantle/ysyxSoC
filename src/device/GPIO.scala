@@ -39,7 +39,7 @@ class Bcd7SegDecoder(n: Int, hex: Boolean = false) extends Module {
               BitPat(0xf.U(4.W)) -> BitPat("b10001110")
             )
           else Seq()),
-    BitPat("b00000000")
+    BitPat("b????????")
   )
 
   for (i <- 0 until n) {
