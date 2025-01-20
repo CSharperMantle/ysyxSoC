@@ -15,7 +15,6 @@ import freechips.rocketchip.util._
 class SdramBurstGen extends Module {
   class Port extends Bundle {
     val en     = Input(Bool())
-    val reload = Input(Bool())
     val a      = Input(UInt(3.W))
     val len    = Input(UInt(2.W))
     val ay     = Output(UInt(3.W))
@@ -25,15 +24,15 @@ class SdramBurstGen extends Module {
   val io = IO(new Port)
 
   private val ctr = RegInit(0.U(3.W))
-  ctr := Mux(io.reload, io.a, Mux(~io.en, 0.U, ctr + 1.U))
+  ctr := Mux(io.en, ctr + 1.U, 0.U)
   io.ay := MuxLookup(io.len, io.a)(
-    (1 to 2).map(i => i.U(2.W) -> Cat(io.a(2, i), ctr(i - 1, 0))) ++ Seq(
+    (1 to 2).map(i => i.U(2.W) -> Cat(io.a(2, i), (io.a + ctr)(i - 1, 0))) ++ Seq(
       0.U(2.W) -> io.a,
-      3.U(2.W) -> ctr
+      3.U(2.W) -> (io.a + ctr)
     )
   )
   io.done := MuxLookup(io.len, true.B)(
-    (1 to 3).map(i => i.U(2.W) -> ((ctr - io.a) === ((1 << i) - 1).U)) ++ Seq(
+    (1 to 3).map(i => i.U(2.W) -> (ctr(i - 1, 0) === ((1 << i) - 1).U)) ++ Seq(
       0.U(2.W) -> true.B
     )
   )
@@ -245,7 +244,6 @@ class SdramModel extends Module {
   )
 
   private val readBurstGen = Module(new SdramBurstGen)
-  readBurstGen.io.reload := y === S_Read & readQueue(1).valid
   readBurstGen.io.en     := y === S_Read & readCursor.valid
   readBurstGen.io.a := Mux(
     y === S_Read & readQueue(1).valid,
