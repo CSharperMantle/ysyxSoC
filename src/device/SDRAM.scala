@@ -14,11 +14,11 @@ import freechips.rocketchip.util._
 
 class SdramBurstGen extends Module {
   class Port extends Bundle {
-    val en     = Input(Bool())
-    val a      = Input(UInt(3.W))
-    val len    = Input(UInt(2.W))
-    val ay     = Output(UInt(3.W))
-    val done   = Output(Bool())
+    val en   = Input(Bool())
+    val a    = Input(UInt(3.W))
+    val len  = Input(UInt(2.W))
+    val ay   = Output(UInt(3.W))
+    val done = Output(Bool())
   }
 
   val io = IO(new Port)
@@ -53,17 +53,18 @@ class SDRAMIO extends Bundle {
 
 class SdramModelBlackBox extends BlackBox with HasBlackBoxInline {
   class Port extends Bundle {
+    val wClk  = Input(Bool())
+    val wEn   = Input(Bool())
     val wBank = Input(UInt(2.W))
     val wRow  = Input(UInt(13.W))
     val wCol  = Input(UInt(13.W))
     val wData = Input(UInt(16.W))
     val wMask = Input(UInt(2.W))
-    val wEn   = Input(Bool())
+    val rEn   = Input(Bool())
     val rBank = Input(UInt(2.W))
     val rRow  = Input(UInt(13.W))
     val rCol  = Input(UInt(13.W))
     val rMask = Input(UInt(2.W))
-    val rEn   = Input(Bool())
     val rData = Output(UInt(16.W))
   }
 
@@ -73,17 +74,18 @@ class SdramModelBlackBox extends BlackBox with HasBlackBoxInline {
     s"${name}.sv",
     s"""
        |module ${name}(
+       |  input             wClk,
+       |  input             wEn,
        |  input      [1:0]  wBank,
        |  input      [12:0] wRow,
        |  input      [12:0] wCol,
        |  input      [15:0] wData,
        |  input      [1:0]  wMask,
-       |  input             wEn,
+       |  input             rEn,
        |  input      [1:0]  rBank,
        |  input      [12:0] rRow,
        |  input      [12:0] rCol,
        |  input      [1:0]  rMask,
-       |  input             rEn,
        |  output reg [15:0] rData
        |);
        |  import "DPI-C" function shortint soc_dpi_sdram_read(input  byte     rBank,
@@ -95,7 +97,7 @@ class SdramModelBlackBox extends BlackBox with HasBlackBoxInline {
        |                                                   input shortint wCol,
        |                                                   input byte     wMask,
        |                                                   input shortint wData);
-       |  always @(wEn, wBank, wRow, wCol, wMask, wData) begin
+       |  always_ff @(posedge wClk) begin
        |    if (wEn) begin
        |      soc_dpi_sdram_write(wBank, wRow, wCol, wMask, wData);
        |    end
@@ -160,7 +162,6 @@ class SdramModel extends Module {
   private val cmd = decoder(Cat(io.cs, io.ras, io.cas, io.we), cmdTable)
 
   private val modeReg        = RegInit(0.U(13.W))
-  private val burstLength    = 1.U(4.W) << modeReg(1, 0)
   private val casLatency     = modeReg(5, 4)
   private val writeBurstMode = modeReg(9)
 
@@ -208,22 +209,26 @@ class SdramModel extends Module {
   modeReg   := Mux(cmd === CmdEncoding.LoadModeReg.asUInt, io.a, modeReg)
   activeRow := Mux(cmd === CmdEncoding.Active.asUInt, io.a, activeRow)
 
-  private class ReadQueueElement extends Bundle {
+  private class RwQueueItem extends Bundle {
     val valid    = Bool()
     val bankAddr = UInt(2.W)
     val colAddr  = UInt(13.W)
     val dqm      = UInt(2.W)
   }
-  private val readQueueInit = Wire(new ReadQueueElement)
-  readQueueInit.valid    := false.B
-  readQueueInit.bankAddr := 0.U
-  readQueueInit.colAddr  := 0.U
-  readQueueInit.dqm      := "b11".U(2.W)
-  private val readQueue = RegInit(VecInit(Seq.fill(4)(readQueueInit)))
+  private object RwQueueItem {
+    val Null = (new RwQueueItem).Lit(
+      _.valid    -> false.B,
+      _.bankAddr -> 0.U,
+      _.colAddr  -> 0.U,
+      _.dqm      -> "b11".U
+    )
+  }
+
+  private val readQueue = RegInit(VecInit(Seq.fill(4)(RwQueueItem.Null)))
   for (i <- 0 until readQueue.length - 1) {
     readQueue(i) := readQueue(i + 1)
   }
-  readQueue(readQueue.length - 1) := readQueueInit
+  readQueue(readQueue.length - 1) := RwQueueItem.Null
   when(cmd === CmdEncoding.Read.asUInt) {
     readQueue(casLatency - 1.U).valid    := true.B
     readQueue(casLatency - 1.U).bankAddr := io.ba
@@ -231,43 +236,60 @@ class SdramModel extends Module {
     readQueue(casLatency - 1.U).dqm      := io.dqm
   }
 
-  private val readCursorInit = Wire(new ReadQueueElement)
-  readCursorInit.valid    := false.B
-  readCursorInit.bankAddr := DontCare
-  readCursorInit.colAddr  := DontCare
-  readCursorInit.dqm      := "b11".U(2.W)
-  private val readCursor = RegInit(0.U.asTypeOf(new ReadQueueElement))
+  private val readCursor = RegInit(RwQueueItem.Null)
   readCursor := Mux(
     y =/= S_Read,
-    readCursorInit,
+    RwQueueItem.Null,
     Mux(readQueue(1).valid, readQueue(1), readCursor)
   )
 
   private val readBurstGen = Module(new SdramBurstGen)
-  readBurstGen.io.en     := y === S_Read & readCursor.valid
+  readBurstGen.io.en := y === S_Read & readCursor.valid
   readBurstGen.io.a := Mux(
     y === S_Read & readQueue(1).valid,
-    readQueue(1).colAddr(2, 0),
-    readCursor.colAddr(2, 0)
-  )
-  readBurstGen.io.len := burstLength(1, 0)
+    readQueue(1).colAddr,
+    readCursor.colAddr
+  )(2, 0)
+  readBurstGen.io.len := modeReg(1, 0)
 
-  readDone := ~readQueue.map(_.valid).orR & readBurstGen.io.done
+  readDone := readQueue.map(~_.valid).andR & readBurstGen.io.done
 
   backend.io.rEn   := y === S_Read & readCursor.valid
-  backend.io.rMask := readCursor.dqm
+  backend.io.rMask := ~readCursor.dqm
   backend.io.rRow  := activeRow
   backend.io.rBank := readCursor.bankAddr
   backend.io.rCol  := Cat(readCursor.colAddr(12, 3), readBurstGen.io.ay)
 
-  writeDone := true.B
+  private val writeCursorNext = Wire(new RwQueueItem)
+  writeCursorNext.valid    := true.B
+  writeCursorNext.bankAddr := io.ba
+  writeCursorNext.colAddr  := io.a
+  writeCursorNext.dqm      := DontCare
 
-  backend.io.wEn   := false.B
-  backend.io.wMask := "b11".U(2.W)
+  private val writeCursor = RegInit(RwQueueItem.Null)
+  writeCursor := Mux(
+    cmd === CmdEncoding.Write.asUInt,
+    writeCursorNext,
+    Mux(y === S_Write, writeCursor, RwQueueItem.Null)
+  )
+
+  private val writeBurstGen = Module(new SdramBurstGen)
+  writeBurstGen.io.en  := y === S_Write | cmd === CmdEncoding.Write.asUInt
+  writeBurstGen.io.a   := Mux(y === S_Write & writeCursor.valid, writeCursor.colAddr, io.a)(2, 0)
+  writeBurstGen.io.len := modeReg(1, 0)
+
+  writeDone := writeBurstGen.io.done
+
+  backend.io.wClk  := clock.asBool
+  backend.io.wEn   := cmd === CmdEncoding.Write.asUInt | (y === S_Write & writeCursor.valid)
+  backend.io.wMask := ~io.dqm
+  backend.io.wData := io.dqi
   backend.io.wRow  := activeRow
-  backend.io.wBank := DontCare
-  backend.io.wCol  := DontCare
-  backend.io.wData := DontCare
+  backend.io.wBank := Mux(writeCursor.valid, writeCursor.bankAddr, io.ba)
+  backend.io.wCol := Cat(
+    Mux(writeCursor.valid, writeCursor.colAddr, io.a)(12, 3),
+    writeBurstGen.io.ay
+  )
 
   io.dqo   := backend.io.rData
   io.dqoEn := Mux(y === S_Read, ~readCursor.dqm, 0.U(2.W))
