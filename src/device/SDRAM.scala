@@ -55,15 +55,11 @@ class SdramModelBlackBox extends BlackBox with HasBlackBoxInline {
   class Port extends Bundle {
     val wClk  = Input(Bool())
     val wEn   = Input(Bool())
-    val wBank = Input(UInt(2.W))
-    val wRow  = Input(UInt(13.W))
-    val wCol  = Input(UInt(13.W))
+    val wAddr = Input(UInt(28.W))
     val wData = Input(UInt(16.W))
     val wMask = Input(UInt(2.W))
     val rEn   = Input(Bool())
-    val rBank = Input(UInt(2.W))
-    val rRow  = Input(UInt(13.W))
-    val rCol  = Input(UInt(13.W))
+    val rAddr = Input(UInt(28.W))
     val rMask = Input(UInt(2.W))
     val rData = Output(UInt(16.W))
   }
@@ -76,35 +72,27 @@ class SdramModelBlackBox extends BlackBox with HasBlackBoxInline {
        |module ${name}(
        |  input             wClk,
        |  input             wEn,
-       |  input      [1:0]  wBank,
-       |  input      [12:0] wRow,
-       |  input      [12:0] wCol,
+       |  input      [27:0] wAddr,
        |  input      [15:0] wData,
        |  input      [1:0]  wMask,
        |  input             rEn,
-       |  input      [1:0]  rBank,
-       |  input      [12:0] rRow,
-       |  input      [12:0] rCol,
+       |  input      [27:0] rAddr,
        |  input      [1:0]  rMask,
        |  output reg [15:0] rData
        |);
-       |  import "DPI-C" function shortint soc_dpi_sdram_read(input  byte     rBank,
-       |                                                      input  shortint rRow,
-       |                                                      input  shortint rCol,
-       |                                                      input  byte     rMask);
-       |  import "DPI-C" function void soc_dpi_sdram_write(input byte     wBank,
-       |                                                   input shortint wRow,
-       |                                                   input shortint wCol,
+       |  import "DPI-C" function shortint soc_dpi_sdram_read(input int  rAddr,
+       |                                                      input byte rMask);
+       |  import "DPI-C" function void soc_dpi_sdram_write(input int      wAddr,
        |                                                   input byte     wMask,
        |                                                   input shortint wData);
        |  always_ff @(posedge wClk) begin
        |    if (wEn) begin
-       |      soc_dpi_sdram_write(wBank, wRow, wCol, wMask, wData);
+       |      soc_dpi_sdram_write(wAddr, wMask, wData);
        |    end
        |  end
-       |  always @(rEn, rBank, rRow, rCol, rMask) begin
+       |  always @(rEn, rAddr, rMask) begin
        |    if (rEn) begin
-       |      rData = soc_dpi_sdram_read(rBank, rRow, rCol, rMask);
+       |      rData = soc_dpi_sdram_read(rAddr, rMask);
        |    end else begin
        |      rData = 0;
        |    end
@@ -165,7 +153,7 @@ class SdramModel extends Module {
   private val casLatency     = modeReg(5, 4)
   private val writeBurstMode = modeReg(9)
 
-  private val activeRow = RegInit(0.U(13.W))
+  private val activeRows = RegInit(VecInit(Seq.fill(4)(0.U(13.W))))
 
   private val readDone  = Wire(Bool())
   private val writeDone = Wire(Bool())
@@ -206,8 +194,11 @@ class SdramModel extends Module {
     )
   )
 
-  modeReg   := Mux(cmd === CmdEncoding.LoadModeReg.asUInt, io.a, modeReg)
-  activeRow := Mux(cmd === CmdEncoding.Active.asUInt, io.a, activeRow)
+  modeReg := Mux(cmd === CmdEncoding.LoadModeReg.asUInt, io.a, modeReg)
+  activeRows.zipWithIndex.foreach {
+    case (r, i) =>
+      r := Mux(cmd === CmdEncoding.Active.asUInt & io.ba === i.U, io.a, r)
+  }
 
   private class RwQueueItem extends Bundle {
     val valid    = Bool()
@@ -256,9 +247,13 @@ class SdramModel extends Module {
 
   backend.io.rEn   := y === S_Read & readCursor.valid
   backend.io.rMask := ~readCursor.dqm
-  backend.io.rRow  := activeRow
-  backend.io.rBank := readCursor.bankAddr
-  backend.io.rCol  := Cat(readCursor.colAddr(12, 3), readBurstGen.io.ay)
+  backend.io.rAddr := Cat(
+    activeRows(readCursor.bankAddr),
+    readCursor.bankAddr,
+    readCursor.colAddr(8, 3),
+    readBurstGen.io.ay,
+    0.U(1.W)
+  )
 
   private val writeCursorNext = Wire(new RwQueueItem)
   writeCursorNext.valid    := true.B
@@ -284,11 +279,12 @@ class SdramModel extends Module {
   backend.io.wEn   := cmd === CmdEncoding.Write.asUInt | (y === S_Write & writeCursor.valid)
   backend.io.wMask := ~io.dqm
   backend.io.wData := io.dqi
-  backend.io.wRow  := activeRow
-  backend.io.wBank := Mux(writeCursor.valid, writeCursor.bankAddr, io.ba)
-  backend.io.wCol := Cat(
-    Mux(writeCursor.valid, writeCursor.colAddr, io.a)(12, 3),
-    writeBurstGen.io.ay
+  backend.io.wAddr := Cat(
+    activeRows(readCursor.bankAddr),
+    Mux(writeCursor.valid, writeCursor.bankAddr, io.ba),
+    Mux(writeCursor.valid, writeCursor.colAddr, io.a)(8, 3),
+    writeBurstGen.io.ay,
+    0.U(1.W)
   )
 
   io.dqo   := backend.io.rData
