@@ -66,8 +66,8 @@ class APBDelayerChisel(val factor: Double) extends Module {
   )
   delayDone := ctr === 0.U
 
-  io.out.psel    := ~y.isOneOf(Seq(S_DelayAdj, S_Delay, S_Respond)) & io.in.psel
-  io.out.penable := ~y.isOneOf(Seq(S_DelayAdj, S_Delay, S_Respond)) & io.in.penable
+  io.out.psel    := ~y.isOneOf(S_DelayAdj, S_Delay, S_Respond) & io.in.psel
+  io.out.penable := ~y.isOneOf(S_DelayAdj, S_Delay, S_Respond) & io.in.penable
   io.out.pwrite  := io.in.pwrite
   io.out.paddr   := io.in.paddr
   io.out.pprot   := io.in.pprot
